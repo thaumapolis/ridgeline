@@ -1,8 +1,8 @@
 # Ridgeline
 
-[![check](https://github.com/dniku/ridgeline/actions/workflows/check.yml/badge.svg)](https://github.com/dniku/ridgeline/actions/workflows/check.yml)
+[![check](https://github.com/thaumapolis/ridgeline/actions/workflows/check.yml/badge.svg)](https://github.com/thaumapolis/ridgeline/actions/workflows/check.yml)
 
-**▶ [Play it now](https://raw.githack.com/dniku/ridgeline/main/index.html)** — no install, no network, nothing to build.
+**▶ [Play it now](https://raw.githack.com/thaumapolis/ridgeline/main/index.html)** — no install, no network, nothing to build.
 
 Climb a hundred-floor tower. One life, one file, no network.
 
