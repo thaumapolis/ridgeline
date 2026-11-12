@@ -93,9 +93,14 @@ neither a nix daemon nor a network. Fonts are pre-generated and committed under
 - **The artifact is self-contained**: no external `src`/`href`, both WOFF2 faces
   embedded, no reference to `localStorage`, `sessionStorage`, `indexedDB`,
   `document.cookie` or `serviceWorker`.
-- **It boots and runs in a sandboxed opaque-origin iframe**, in a frame where a
-  control probe confirms `localStorage` and `sessionStorage` throw
-  `SecurityError`.
+- **It boots and runs in a sandboxed frame with storage denied**, and proves it
+  by reporting from inside the frame: seam present, floor 1, canvas painted, and
+  `localStorage`/`sessionStorage` observed throwing `SecurityError` there.
+  Silence from the frame is treated as a failure rather than a pass — the
+  previous version of this check asserted only "no `SecurityError` appeared",
+  which is also what a frame that never executed the artifact looks like. The
+  test is verified to go red three ways: an artifact that touches storage at
+  boot, a frame that loads nothing, and an unsandboxed control.
 - **Layout holds** at 1280×860, 390×844 and 844×390: the canvas fits the stage
   and no control overflows the viewport.
 - **Real input works**: keyboard moves the player and advances turns; tapping a

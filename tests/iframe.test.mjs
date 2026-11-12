@@ -1,18 +1,33 @@
 /**
- * iframe.test.mjs — the artifact must boot and be playable inside a sandboxed
- * opaque-origin iframe, which is the harshest of its three target contexts.
+ * iframe.test.mjs — the artifact must boot and paint inside a sandboxed frame
+ * whose storage is confirmed dead, and must prove it by reporting from inside.
  *
- * `sandbox="allow-scripts"` with no `allow-same-origin` gives the document an
- * opaque origin, where localStorage, indexedDB and document.cookie all throw
- * SecurityError on access. That is precisely the dependency the single-file
- * promise forbids, so this is not a nicety: an app that touches storage on boot
- * dies here and works everywhere else.
+ * WHY THE FRAME HAS TO ANNOUNCE ITSELF
  *
- * Driving it through a real frame also catches a relative fetch, which file://
- * and a dev server both tolerate.
+ * Every version of this test that relied on "no SecurityError surfaced as a page
+ * error" was passing vacuously. That is also exactly what a frame that executed
+ * nothing looks like. Verified by mutation: an artifact that calls
+ * `localStorage.setItem` at boot does fail the test below, but a frame in which
+ * the artifact never runs must fail too, so the frame posts a message about
+ * itself and silence is treated as a harness fault rather than a pass.
+ *
+ * WHY `src=` AND NOT `srcdoc`
+ *
+ * The artifact is one inline `<script>`. In a `srcdoc` frame whose parent is a
+ * `file:` document, Firefox does not execute inline scripts under
+ * `sandbox="allow-scripts"` — the frame loads, paints nothing, logs no error.
+ * The same `srcdoc` markup does run when the parent is served over `https:`, so
+ * this is a `file:`-parent interaction, not a general sandbox rule, and the
+ * advertised `https:` preview links are unaffected. Loading by `src=` runs the
+ * inline script and still denies Web Storage. See knowledge/environment.md.
+ *
+ * A frame that has BOTH `srcdoc` and `src` keeps `srcdoc` authoritative, so the
+ * artifact is loaded only after `srcdoc` is removed; forgetting that loads
+ * nothing at all and, absent a self-report, looks like a pass.
  */
 import assert from 'node:assert/strict';
-import { withBrowser, openApp, log } from './harness.mjs';
+import { readFile } from 'node:fs/promises';
+import { withBrowser, log } from './harness.mjs';
 
 const engine = (() => {
   const i = process.argv.indexOf('--engine');
@@ -28,120 +43,169 @@ function test(name, fn) {
   );
 }
 
+/** Appended to the artifact so the frame can report its own state. */
+const SELF_REPORT = [
+  '  <script>',
+  '  window.addEventListener("load", function () {',
+  '    setTimeout(function () {',
+  '      var o = { probe: "artifact" };',
+  '      o.seam = (typeof window.ridgeline === "object");',
+  '      o.floor = o.seam ? window.ridgeline.state.floorNumber : null;',
+  '      var cs = document.querySelectorAll("canvas");',
+  '      o.canvases = cs.length;',
+  '      var painted = 0;',
+  '      [].forEach.call(cs, function (c) {',
+  '        try {',
+  '          var g = c.getContext("2d");',
+  '          if (!g) { painted += 1; return; }',
+  '          var d = g.getImageData(0, 0, Math.min(c.width, 80), Math.min(c.height, 80)).data;',
+  '          for (var j = 3; j < d.length; j += 4) { if (d[j] !== 0) { painted += 1; break; } }',
+  '        } catch (e) { painted += 1; }',
+  '      });',
+  '      o.painted = painted;',
+  '      try { void window.localStorage; o.localStorage = "accessible"; }',
+  '      catch (e) { o.localStorage = "denied:" + e.name; }',
+  '      try { void window.indexedDB; o.indexedDB = "accessible"; }',
+  '      catch (e) { o.indexedDB = "denied:" + e.name; }',
+  '      o.origin = String(window.location.origin);',
+  '      parent.postMessage(o, "*");',
+  '    }, 1200);',
+  '  });',
+  '  </script>',
+  '',
+].join('\n');
+
+/**
+ * Proves storage is dead using an `onload` attribute rather than an inline
+ * script, so it reports truthfully even under a `file:` parent.
+ */
+const HOSTILE_CONTROL =
+  '<!doctype html><html><body onload="(function(){var o={probe:\'control\'};' +
+  'var ks=[\'localStorage\',\'sessionStorage\',\'indexedDB\'];' +
+  'for(var i=0;i<3;i++){try{void window[ks[i]];o[ks[i]]=\'accessible\'}' +
+  'catch(e){o[ks[i]]=\'denied:\'+e.name}}' +
+  'o.origin=String(window.location.origin);parent.postMessage(o,\'*\')})()">' +
+  'control</body></html>';
+
+const PARENT = [
+  '<!doctype html><html><body>',
+  '<iframe id="hostile" sandbox="allow-scripts" style="width:880px;height:680px;border:0"></iframe>',
+  '<script>',
+  'window.__messages = [];',
+  'window.addEventListener("message", function (ev) { window.__messages.push(ev.data); });',
+  'document.getElementById("hostile").srcdoc = ' + JSON.stringify(HOSTILE_CONTROL) + ';',
+  'window.loadArtifactIntoFrame = function (srcUrl) {',
+  '  var f = document.getElementById("hostile");',
+  '  f.removeAttribute("srcdoc");',
+  '  f.src = srcUrl;',
+  '};',
+  '</script>',
+  '</body></html>',
+  '',
+].join('\n');
+
+const ARTIFACT_URL = 'https://artifact.invalid/index.html';
+const PARENT_URL = 'https://host-parent.invalid/';
+
+async function awaitMessage(page, probeName, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const found = await page.evaluate((name) => {
+      const idx = window.__messages.findIndex((m) => m && m.probe === name);
+      if (idx === -1) { return null; }
+      // Drain what we consume: an undrained buffer lets a later case read this
+      // one's report and pass for reasons unrelated to it.
+      const [msg] = window.__messages.splice(idx, 1);
+      return msg;
+    }, probeName);
+    if (found) { return found; }
+    await page.waitForTimeout(150);
+  }
+  return null;
+}
+
+/** A page hosting the sandboxed frame, with the control already reporting. */
+async function openHostilePage(browser, context, bodyHtml) {
+  await context.route(PARENT_URL, (route) =>
+    route.fulfill({ status: 200, contentType: 'text/html', body: PARENT }));
+  await context.route(ARTIFACT_URL, (route) =>
+    route.fulfill({ status: 200, contentType: 'text/html', body: bodyHtml }));
+  const page = await context.newPage();
+  const problems = [];
+  page.on('pageerror', (e) => problems.push(`pageerror: ${e.message}`));
+  await page.goto(PARENT_URL, { waitUntil: 'load' });
+  return { page, problems };
+}
+
 await withBrowser(engine, async (browser) => {
-  await test('boots and plays in a sandbox="allow-scripts" opaque-origin iframe', async () => {
-    const context = await browser.newContext({ viewport: { width: 900, height: 700 } });
-    const page = await context.newPage();
-    const problems = [];
-    page.on('pageerror', (e) => problems.push(`pageerror: ${e.message}`));
+  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
 
-    // The parent is the only thing that gets to create the frame; the game
-    // cannot opt into this, so the test constructs the hostile context.
-    await page.goto('about:blank');
-    await page.evaluate(async (src) => {
-      const frame = document.createElement('iframe');
-      // allow-scripts only: no allow-same-origin, so the origin is opaque.
-      frame.setAttribute('sandbox', 'allow-scripts');
-      frame.style.cssText = 'width:880px;height:680px;border:0';
-      frame.srcdoc = src;
-      document.body.appendChild(frame);
-      await new Promise((resolve) => { frame.addEventListener('load', resolve, { once: true }); });
-    }, await (await import('node:fs/promises')).readFile(new URL('../index.html', import.meta.url), 'utf8'));
+  await test('the sandboxed frame reports storage as unavailable', async () => {
+    const context = await browser.newContext({ viewport: { width: 940, height: 760 } });
+    const { page } = await openHostilePage(browser, context, html);
 
-    // Reach into the frame. Reading a property off a cross-origin iframe's
-    // contentWindow is allowed for own properties of the window object only
-    // when same-origin, so instead ask the frame to report over postMessage —
-    // but the simplest reliable probe is that the frame painted a canvas and
-    // that no SecurityError surfaced as a page error.
-    await page.waitForTimeout(600);
-    const frameInfo = await page.evaluate(() => {
-      const frame = document.querySelector('iframe');
-      const rect = frame.getBoundingClientRect();
-      return { exists: !!frame, w: rect.width, h: rect.height };
-    });
-    assert.ok(frameInfo.exists, 'iframe is present');
-    assert.ok(frameInfo.w > 100 && frameInfo.h > 100, 'iframe has a real box');
+    const control = await awaitMessage(page, 'control', 10000);
+    assert.notEqual(control, null, 'control frame must report about itself; silence is a harness fault');
+    log(`control: ${JSON.stringify(control)}`);
 
-    // Any storage access at boot would raise SecurityError inside the frame and
-    // surface as a page error. Absence of errors is the assertion.
-    const securityErrors = problems.filter((p) => /SecurityError|localStorage|indexedDB|cookie/i.test(p));
-    assert.deepEqual(securityErrors, [], 'no storage SecurityError from inside the opaque-origin frame');
-    assert.deepEqual(problems, [], 'no page errors at all');
+    // Judge the capability, not the mechanism: Firefox denies storage by giving
+    // the frame an opaque origin, Chromium denies it while keeping a file://
+    // origin. Gating on origin === "null" would call a valid Chromium run
+    // non-hostile for the wrong reason.
+    const denied = ['localStorage', 'sessionStorage'].filter((k) => String(control[k]).startsWith('denied'));
+    assert.equal(denied.length, 2,
+      `the frame must deny Web Storage, otherwise nothing here is hostile; got ${JSON.stringify(control)}`);
+    log(`frame denies: ${denied.join(', ')} (origin=${control.origin})`);
 
     await context.close();
   });
 
-  await test('the sandboxed frame genuinely reports storage as unavailable', async () => {
-    // The point of this test is to stop the artifact test above from passing
-    // vacuously. `sandbox="allow-scripts"` alone turned out NOT to be hostile in
-    // this engine: the frame's document stayed readable and storage did not
-    // throw, so "the artifact logged no SecurityError" proves nothing on its
-    // own. Rather than assert a sandbox property that may or may not hold, ask
-    // the real question directly: does the shipped artifact work in a frame
-    // where storage is confirmed dead?
-    //
-    // The frame below proves storage is dead from the inside, then loads the
-    // artifact. If the artifact needed storage, it throws here and the page
-    // error list fills up.
-    const context = await browser.newContext({ viewport: { width: 900, height: 700 } });
-    const page = await context.newPage();
-    const problems = [];
-    page.on('pageerror', (e) => problems.push(`pageerror: ${e.message}`));
+  await test('the artifact boots, paints and reports storage-denied inside that frame', async () => {
+    const context = await browser.newContext({ viewport: { width: 940, height: 760 } });
+    const { page, problems } = await openHostilePage(
+      browser, context, html.replace('</body>', SELF_REPORT + '</body>'));
+    const control = await awaitMessage(page, 'control', 10000);
+    assert.notEqual(control, null, 'control must report before any artifact result means anything');
 
-    await page.goto('about:blank');
-    const html = await (await import('node:fs/promises')).readFile(new URL('../index.html', import.meta.url), 'utf8');
-
-    // Establish the hostile baseline with a control document that can report
-    // truthfully because it is same-origin with the parent.
-    const control = await page.evaluate(async () => {
-      const f = document.createElement('iframe');
-      f.srcdoc = `<!doctype html><html><body><script>
-        const r = [];
-        for (const n of ['localStorage','sessionStorage','indexedDB']) {
-          try { window[n]; r.push(n + '=present'); } catch (e) { r.push(n + '=' + e.name); }
-        }
-        window.parent.__control = r.join(' ');
-      <\/script></body></html>`;
-      document.body.appendChild(f);
-      await new Promise((res) => f.addEventListener('load', res, { once: true }));
-      await new Promise((res) => setTimeout(res, 150));
-      return window.__control;
-    });
-    log(`control (unsandboxed iframe): ${control}`);
-
-    // Now the actual requirement: the artifact, inside a frame whose storage is
-    // blocked. Chromium/Firefox both deny storage for `sandbox="allow-scripts"
-    // ` without `allow-same-origin`; where they do not, this test records that
-    // out loud instead of pretending.
-    await page.evaluate(async (src) => {
-      const f = document.createElement('iframe');
-      f.setAttribute('sandbox', 'allow-scripts');
-      f.style.cssText = 'width:880px;height:680px;border:0';
-      f.srcdoc = src;
-      document.body.appendChild(f);
-      await new Promise((res) => f.addEventListener('load', res, { once: true }));
-    }, html);
-    await page.waitForTimeout(800);
-
-    const hostile = problems.filter((p) => /SecurityError/i.test(p));
-    if (hostile.length > 0) {
-      assert.fail(`artifact hit a SecurityError inside the sandboxed frame: ${hostile.join('; ')}`);
+    await page.evaluate((url) => window.loadArtifactIntoFrame(url), ARTIFACT_URL);
+    const report = await awaitMessage(page, 'artifact', 20000);
+    if (report === null) {
+      const state = await page.evaluate(() => {
+        const f = document.getElementById('hostile');
+        return {
+          buffered: window.__messages.length,
+          src: f.getAttribute('src'),
+          hasSrcdoc: f.hasAttribute('srcdoc'),
+        };
+      });
+      assert.fail(`the artifact never announced itself; it may not have run at all. ` +
+        `harness=${JSON.stringify(state)} pageErrors=${JSON.stringify(problems)}`);
     }
-    log('artifact ran in the sandboxed frame with no SecurityError');
-    assert.deepEqual(problems, [], 'no page errors from the artifact inside the frame');
+    log(`artifact: ${JSON.stringify(report)}`);
+
+    assert.equal(report.seam, true, 'test seam present inside the hostile frame');
+    assert.equal(report.floor, 1, 'first floor reached inside the hostile frame');
+    assert.ok(report.canvases >= 1, 'canvas present inside the hostile frame');
+    assert.ok(report.painted >= 1, 'canvas actually painted inside the hostile frame');
+    assert.ok(String(report.localStorage).startsWith('denied'),
+      `the frame must still deny storage while the artifact runs; got ${report.localStorage}`);
+    // A page error from the harness must not be reported as an artifact defect,
+    // but must not be swallowed either, so it is named in the message.
+    assert.deepEqual(problems, [], `no page errors while the artifact ran (got ${problems.length})`);
+
     await context.close();
   });
 
   await test('boots under file:// with its seam and first floor', async () => {
-    const { context, page, problems } = await openApp(browser, 'desktop');
+    const context = await browser.newContext({ viewport: { width: 1280, height: 860 } });
+    const page = await context.newPage();
+    const problems = [];
+    page.on('pageerror', (e) => problems.push(`pageerror: ${e.message}`));
+    await page.goto(new URL('../index.html', import.meta.url).href, { waitUntil: 'load' });
+    await page.waitForTimeout(600);
     const boot = await page.evaluate(() => ({
       seam: typeof window.ridgeline === 'object',
       floor: window.ridgeline.state.floorNumber,
-      // Recorded, not asserted: Firefox allows localStorage under file://, so
-      // file:// is not the hostile context — the opaque-origin frame above is.
-      storageAllowedHere: (() => {
-        try { window.localStorage.getItem('x'); return true; } catch { return false; }
-      })(),
     }));
     assert.ok(boot.seam, 'test seam present under file://');
     assert.equal(boot.floor, 1);
