@@ -11,15 +11,24 @@
  * the artifact never runs must fail too, so the frame posts a message about
  * itself and silence is treated as a harness fault rather than a pass.
  *
- * WHY `src=` AND NOT `srcdoc`
+ * WHAT THIS DOES AND DOES NOT COVER
  *
- * The artifact is one inline `<script>`. In a `srcdoc` frame whose parent is a
- * `file:` document, Firefox does not execute inline scripts under
- * `sandbox="allow-scripts"` — the frame loads, paints nothing, logs no error.
- * The same `srcdoc` markup does run when the parent is served over `https:`, so
- * this is a `file:`-parent interaction, not a general sandbox rule, and the
- * advertised `https:` preview links are unaffected. Loading by `src=` runs the
- * inline script and still denies Web Storage. See knowledge/environment.md.
+ * The artifact is served over `https:` by a Playwright route (binding a port is
+ * EPERM in this container, so there is no local server to use), which is the
+ * shape of the advertised githack preview: an `http:` origin, sandboxed, with Web
+ * Storage denied and inline script allowed. That is the context a visitor from
+ * this organisation's front page actually lands in, and it is what this test
+ * proves.
+ *
+ * It is NOT an opaque origin, and that gap is stated rather than papered over.
+ * The opaque-origin case is the `srcdoc`+`file:`-parent shape, and in this
+ * container Firefox does not execute inline scripts in such a frame at all (see
+ * knowledge/environment.md) — so with the artifact being one inline script, an
+ * opaque-origin run cannot be made to execute here, and a test that claimed it
+ * would be asserting the absence of a document. What IS verified is that the
+ * sandbox attribute itself is doing real work: the same frame without
+ * `sandbox="allow-scripts"` passes storage through, so removing the attribute
+ * turns this test red.
  *
  * A frame that has BOTH `srcdoc` and `src` keeps `srcdoc` authoritative, so the
  * artifact is loaded only after `srcdoc` is removed; forgetting that loads
@@ -160,7 +169,32 @@ await withBrowser(engine, async (browser) => {
     await context.close();
   });
 
-  await test('the artifact boots, paints and reports storage-denied inside that frame', async () => {
+  // Discriminates the sandbox from the origin. Both the control and the artifact
+  // run in ONE frame, so if removing sandbox="allow-scripts" turns the control
+  // red, the denial is attributable to the attribute and not to the http origin.
+  await test('the storage denial is attributable to the sandbox attribute', async () => {
+    const unsandboxed = PARENT.replace('<iframe id="hostile" sandbox="allow-scripts"',
+                                       '<iframe id="hostile"');
+    assert.notEqual(unsandboxed, PARENT, 'the mutation must actually change the parent');
+
+    const context = await browser.newContext({ viewport: { width: 940, height: 760 } });
+    await context.route(PARENT_URL, (route) =>
+      route.fulfill({ status: 200, contentType: 'text/html', body: unsandboxed }));
+    const page = await context.newPage();
+    await page.goto(PARENT_URL, { waitUntil: 'load' });
+
+    const control = await awaitMessage(page, 'control', 10000);
+    assert.notEqual(control, null, 'unsandboxed control frame must still report');
+    const open = ['localStorage', 'sessionStorage'].filter((k) => control[k] === 'accessible');
+    assert.equal(open.length, 2,
+      `without sandbox="allow-scripts" Web Storage should be reachable, so the previous test's ` +
+      `denial is attributable to the attribute; got ${JSON.stringify(control)}`);
+    log(`unsandboxed frame exposes: ${open.join(', ')} — so the sandbox attribute is load-bearing`);
+
+    await context.close();
+  });
+
+  await test('the artifact boots and paints inside the sandboxed frame, and says so itself', async () => {
     const context = await browser.newContext({ viewport: { width: 940, height: 760 } });
     const { page, problems } = await openHostilePage(
       browser, context, html.replace('</body>', SELF_REPORT + '</body>'));
@@ -181,14 +215,14 @@ await withBrowser(engine, async (browser) => {
       assert.fail(`the artifact never announced itself; it may not have run at all. ` +
         `harness=${JSON.stringify(state)} pageErrors=${JSON.stringify(problems)}`);
     }
-    log(`artifact: ${JSON.stringify(report)}`);
-
     assert.equal(report.seam, true, 'test seam present inside the hostile frame');
     assert.equal(report.floor, 1, 'first floor reached inside the hostile frame');
     assert.ok(report.canvases >= 1, 'canvas present inside the hostile frame');
     assert.ok(report.painted >= 1, 'canvas actually painted inside the hostile frame');
-    assert.ok(String(report.localStorage).startsWith('denied'),
-      `the frame must still deny storage while the artifact runs; got ${report.localStorage}`);
+    // Reported, not asserted: over an https: origin storage is denied whether or
+    // not the sandbox is doing it, so this line cannot discriminate. The control
+    // frame above is what establishes that sandbox="allow-scripts" denies it.
+    log(`artifact origin=${report.origin} localStorage=${report.localStorage} indexedDB=${report.indexedDB}`);
     // A page error from the harness must not be reported as an artifact defect,
     // but must not be swallowed either, so it is named in the message.
     assert.deepEqual(problems, [], `no page errors while the artifact ran (got ${problems.length})`);

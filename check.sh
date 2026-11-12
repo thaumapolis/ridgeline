@@ -91,9 +91,11 @@ phase "stairs always reachable" ./tools/toolchain.sh node tools/reach.mjs --floo
 # 7. Browser smoke: boots, paints, lays out, in both device shapes.
 phase "browser smoke ($ENGINE)" ./tools/toolchain.sh node tests/smoke.test.mjs --engine "$ENGINE"
 
-# 7b. The sandboxed opaque-origin iframe, with a control proving the frame
+# 7b. The sandboxed https frame — the shape of the advertised preview link — with
+# a control proving the frame denies storage and a mutation proving the sandbox
+# attribute is what denies it. Not an opaque origin: see the header of the test.
 #     really denies storage, so the pass cannot be vacuous.
-phase "sandboxed opaque-origin iframe ($ENGINE)" ./tools/toolchain.sh node tests/iframe.test.mjs --engine "$ENGINE"
+phase "sandboxed frame with storage denied ($ENGINE)" ./tools/toolchain.sh node tests/iframe.test.mjs --engine "$ENGINE"
 
 # 7c. Golden screenshots: pixel regression against baselines painted by this
 # engine. Deterministic by seed + fixed command script + reduced motion, and
