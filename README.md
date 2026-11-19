@@ -21,6 +21,11 @@ memory and ends when the tab does.
 Open `index.html` in any browser. Desktop and Android touch, portrait and
 landscape.
 
+**The view follows you.** You are always centred, and the floor scrolls under
+you; the dungeon is bigger than the screen at every size, so a room and its
+corridors fill a phone rather than shrinking to fit one. Tiles are whole device
+pixels, so glyphs stay sharp instead of being resampled.
+
 ## Playing
 
 The goal is the roof: floor 100. Walk onto the stairs (`>`) to climb. Monsters
@@ -88,8 +93,9 @@ neither a nix daemon nor a network. Fonts are pre-generated and committed under
   could not resolve on a different machine. That is fixed and CI-green, and the
   fonts phase now also asserts that regenerating the embedded subsets reproduces
   the committed bytes exactly.
-- **Every floor is completable.** 4000 generated floors, A* from entrance to
-  stairs: 0 unreachable. Path length p50 = 42 tiles, p90 = 64.
+- **Every floor is completable.** 4000 generated floors (56×44 each), A* from
+  entrance to stairs: 0 unreachable. Measured on a 400-floor sample: path length
+  p50 = 53 tiles, p90 = 85, and 17-30 rooms per floor.
 - **The artifact is self-contained**: no external `src`/`href`, both WOFF2 faces
   embedded, no reference to `localStorage`, `sessionStorage`, `indexedDB`,
   `document.cookie` or `serviceWorker`.
@@ -108,8 +114,13 @@ neither a nix daemon nor a network. Fonts are pre-generated and committed under
   skips inline scripts in a `srcdoc` frame under a `file:` parent, and binding a
   local port is `EPERM`), so that claim is left unstated rather than tested
   vacuously.
-- **Layout holds** at 1280×860, 390×844 and 844×390: the canvas fits the stage
-  and no control overflows the viewport.
+- **Layout holds** at 1280×860, 390×844 and 844×390, and is asserted rather than
+  eyeballed: `tests/layout.test.mjs` checks, in all three shapes, that the canvas
+  fills its stage box, that the bitmap is the CSS box times the device pixel
+  ratio, that the tile size came from the measured box rather than a canvas'
+  intrinsic 300×150 default, that the view never asks for more floor than exists
+  (a dead band), and that all four bitmap corners are painted. A separate case
+  walks the player and asserts the camera scrolls to keep up.
 - **Real input works**: keyboard moves the player and advances turns; tapping a
   tile moves the player. Verified by driving the built page.
 
