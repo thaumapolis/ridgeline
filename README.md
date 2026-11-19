@@ -28,6 +28,9 @@ you; the dungeon is bigger than the screen at every size, so a room and its
 corridors fill a phone rather than shrinking to fit one. Tiles are whole device
 pixels, so glyphs stay sharp instead of being resampled.
 
+![The title card over floor 1: the view is centred on the player, the explored
+room is lit against fog, and the d-pad and item buttons sit below it.](tests/golden/firefox/01-title.png)
+
 ## Playing
 
 The goal is the roof: floor 100. Walk onto the stairs (`>`) to climb. Monsters
