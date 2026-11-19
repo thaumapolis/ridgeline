@@ -29,7 +29,7 @@ export const Tile = Object.freeze({
 });
 
 /** A generated floor. `grid` is row-major, `rooms` and `spawns` are derived. */
-export const FloorSize = Object.freeze({ width: 34, height: 22 });
+export const FloorSize = Object.freeze({ width: 56, height: 44 });
 
 const MIN_ROOM = 4;
 const MAX_ROOM = 9;
@@ -113,6 +113,20 @@ function carveH(grid, w, x0, x1, y) {
 
 function carveV(grid, w, y0, y1, x) {
   for (let y = Math.min(y0, y1); y <= Math.max(y0, y1); y += 1) grid[y * w + x] = Tile.Floor;
+}
+
+/** The room whose centre is closest to the map's centre, ties broken by order. */
+function nearestToCentre(rooms, w, h) {
+  let best = rooms[0];
+  let bestD = Infinity;
+  for (const room of rooms) {
+    const d = (room.cx - w / 2) ** 2 + (room.cy - h / 2) ** 2;
+    if (d < bestD) {
+      bestD = d;
+      best = room;
+    }
+  }
+  return best;
 }
 
 /**
@@ -208,10 +222,20 @@ export function generateFloor(rng, floor) {
     if (rooms.length < 4) continue;
     carveCorridors(rooms, grid, w, rng);
 
-    // Entrance in the first room, stairs in the last. Room order is BSP
-    // traversal order, so these are usually far apart; the distance check below
-    // makes that a requirement rather than a tendency.
-    const entranceRoom = rooms[0];
+    // Entrance in the room nearest the map's centre, stairs in the last room.
+    //
+    // Taking `rooms[0]` looked reasonable -- BSP traversal order puts it far from
+    // the last room -- but it means the first leaf, which is always the TOP-LEFT
+    // corner of the map. Every floor then opens in the same corner, and with fog
+    // hiding everything outside the sight radius the player sees a lit square
+    // pinned to the corner of the view with nothing else in it, at every size and
+    // on every seed. That is the single reason the view looked broken on a phone.
+    //
+    // Centre-placing costs nothing in play length: it maximises the distance to
+    // the farthest room, so the walk to the stairs stays long (measured with
+    // tools/reach.mjs). It also spreads monsters around the player instead of
+    // off in one direction.
+    const entranceRoom = nearestToCentre(rooms, w, h);
     const stairsRoom = rooms[rooms.length - 1];
     const entrance = { x: entranceRoom.cx, y: entranceRoom.cy };
     const stairs = { x: stairsRoom.cx, y: stairsRoom.cy };
