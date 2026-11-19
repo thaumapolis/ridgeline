@@ -123,7 +123,23 @@ html, body {
 
 #game {
   display: block;
-  image-rendering: pixelated;
+  /* Absolutely positioned to fill #stage, which is `position: relative` and
+   * already clips with `overflow: hidden`.
+   *
+   * This rule is load-bearing in a way that is invisible until it breaks. A
+   * canvas with no CSS size falls back to the intrinsic 300x150 default, so
+   * `getBoundingClientRect()` on it returns 300x150 -- and relayout() measures
+   * exactly that box to choose the tile size. The first boot after this rule went
+   * missing picked tile 6 in a stage that was really 884px wide: a tiny, correct
+   * rendering of the wrong box. Positioning it here also takes the canvas out of
+   * the flex flow, so it can never contribute its bitmap height to the stage row
+   * (the same hazard the `minmax(0, 1fr)` on #app guards against).
+   *
+   * `image-rendering: pixelated` is deliberately absent: the bitmap is sized to
+   * the CSS box times devicePixelRatio, so nothing is upscaled and the property
+   * would only harden glyph edges. Removed for that reason, not for tidiness. */
+  position: absolute;
+  inset: 0;
   touch-action: none;
 }
 

@@ -22,6 +22,7 @@
 import { ConsumableKind, WeaponKind, WEAPONS, CONSUMABLES, TOTAL_FLOORS, ZONES } from './content.js';
 import { newRun, buildFloor, step, zoneFor, directionFromDelta } from './game.js';
 import { Direction, Outcome, canPlayerAttack, enemyAt, movePlayer, playerAttack, useConsumable, advanceProjectiles, enemyTurns, endTurn } from './rules.js';
+import { FloorSize } from './dungeon.js';
 import { makeRenderer } from './render.js';
 
 const KEY_DIRECTION = new Map([
@@ -56,7 +57,7 @@ export function startApp(root) {
   const canvas = el('game');
   const overlay = el('overlay');
   const logBox = el('log');
-  const renderer = makeRenderer(canvas);
+  const renderer = makeRenderer(canvas, { cols: FloorSize.width, rows: FloorSize.height });
 
   /**
    * Test seam. The interaction suite drives the built page and needs to assert
@@ -413,6 +414,16 @@ export function startApp(root) {
 
   window.addEventListener('resize', queueRelayout);
   window.addEventListener('orientationchange', () => setTimeout(queueRelayout, 120));
+
+  // Observe the STAGE, not the window. The window listener cannot catch the case
+  // that matters most here: the stage's own box settling after the first frame.
+  // At boot on desktop the stage measured 300x150 -- a canvas' intrinsic default --
+  // when start() laid out, so the view was built for a box three times too small
+  // and only corrected itself if a later resize happened to fire. Observing the
+  // element catches layout settling, mobile URL-bar collapse, and viewport shifts
+  // that do not always arrive as a window resize event.
+  const stageObserver = new ResizeObserver(queueRelayout);
+  stageObserver.observe(el('stage'));
 
   // Boot on the title card, with the map already laid out behind it so the
   // screen is never blank while the first card is up.
