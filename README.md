@@ -1,5 +1,7 @@
 # Ridgeline
 
+<!-- Front page image: tests/golden/firefox/01-title.png -->
+
 [![check](https://github.com/thaumapolis/ridgeline/actions/workflows/check.yml/badge.svg)](https://github.com/thaumapolis/ridgeline/actions/workflows/check.yml)
 
 **▶ [Play it now](https://raw.githack.com/thaumapolis/ridgeline/main/index.html)** — no install, no network, nothing to build.
