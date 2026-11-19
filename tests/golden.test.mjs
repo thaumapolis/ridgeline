@@ -106,7 +106,7 @@ const SCENES = [
       { type: 'move', direction: 'East' },
       { type: 'move', direction: 'South' },
       { type: 'wait' },
-      { type: 'move', direction: 'East' },
+      { type: 'move', direction: 'West' },
     ],
   },
   {

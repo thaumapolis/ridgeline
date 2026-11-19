@@ -95,6 +95,8 @@ phase "browser smoke ($ENGINE)" ./tools/toolchain.sh node tests/smoke.test.mjs -
 # a control proving the frame denies storage and a mutation proving the sandbox
 # attribute is what denies it. Not an opaque origin: see the header of the test.
 #     really denies storage, so the pass cannot be vacuous.
+phase "view layout ($ENGINE)" ./tools/toolchain.sh node tests/layout.test.mjs --engine "$ENGINE"
+
 phase "sandboxed frame with storage denied ($ENGINE)" ./tools/toolchain.sh node tests/iframe.test.mjs --engine "$ENGINE"
 
 # 7c. Golden screenshots: pixel regression against baselines painted by this
