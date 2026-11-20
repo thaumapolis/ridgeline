@@ -1,6 +1,6 @@
 # Ridgeline
 
-<!-- Front page image: tests/golden/firefox/01-title.png -->
+<!-- Front page image: docs/desktop.png -->
 
 [![check](https://github.com/thaumapolis/ridgeline/actions/workflows/check.yml/badge.svg)](https://github.com/thaumapolis/ridgeline/actions/workflows/check.yml)
 
@@ -28,8 +28,14 @@ you; the dungeon is bigger than the screen at every size, so a room and its
 corridors fill a phone rather than shrinking to fit one. Tiles are whole device
 pixels, so glyphs stay sharp instead of being resampled.
 
-![The title card over floor 1: the view is centred on the player, the explored
-room is lit against fog, and the d-pad and item buttons sit below it.](tests/golden/firefox/01-title.png)
+![Two explored rooms joined by a corridor, lit against the fog grid, with the
+player in between.](docs/desktop.png)
+
+`docs/desktop.png` is captured for the showcase's 2:1 card by
+`tools/capture-card.mjs`: the stage forced to 2.00:1, a fixed seed, the player
+walked a few tiles, and the clip taken on the canvas rather than the page.
+Re-run that script after anything that changes the view, or the card silently
+shows stale content.
 
 ## Playing
 
