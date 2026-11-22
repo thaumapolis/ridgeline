@@ -127,7 +127,7 @@ export const CONSUMABLES = Object.freeze({
   },
   [ConsumableKind.Torch]: {
     label: 'Torch', glyph: 'F', radius: 8, duration: 60, minFloor: 3, stack: 3,
-    note: 'Wide light for 60 turns; reveals the floor.',
+    note: 'Wide light for 60 turns — about a third of a floor.',
   },
   [ConsumableKind.Scroll]: {
     label: 'Scroll', glyph: '#', minFloor: 10, stack: 2,
