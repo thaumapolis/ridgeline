@@ -17,8 +17,13 @@
  * (see the comment above it in render.js -- remembering monsters was rejected on
  * purpose), so the picture is one lit disc around the player plus fog. Do not
  * describe the output as showing explored rooms; it does not, and no walk makes it
- * so. Measured on the 56x44 window this captures: the sight radius lights about 8%
- * of it, and a lit torch about 25%.
+ * so. Measured on the painted canvas, not in tiles: 95.4% of pixels land at
+ * luminance 0-31 and 4.6% at 32-63, with nothing brighter at all. So the frame is
+ * overwhelmingly dark by design, and that is the game's visibility model rather
+ * than a capture to be improved -- 12 seeds x 5 scripted routes all come out
+ * ~99.9% dark, and a run starts with no torch, so there is no pose that makes
+ * this card bright. Anyone looking for the card to look busier needs a different
+ * subject, not a different seed.
  *
  * Deterministic: fixed seed; reduced motion removes the bar-width transition that
  * makes ridgeline's own goldens depend on capture timing.
